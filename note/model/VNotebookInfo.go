@@ -24,10 +24,10 @@ package model
 type VNotebookInfo struct {
 	AttachmentFolder string       `json:"attachment_folder,omitempty"`
 	CreatedTime      string       `json:"created_time,omitempty"`
-	Files            []VNoteInfo  `json:"files,omitempty"`
+	Files            []VNoteInfo  `json:"files"`
 	ImageFolder      string       `json:"image_folder,omitempty"`
 	RecycleBinFolder string       `json:"recycle_bin_folder,omitempty"`
-	SubDirectories   []SubDirInfo `json:"sub_directories,omitempty"`
+	SubDirectories   []SubDirInfo `json:"sub_directories"`
 	Tags             []string     `json:"tags,omitempty"`
 	Version          string       `json:"version,omitempty"`
 }

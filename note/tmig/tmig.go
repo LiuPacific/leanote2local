@@ -56,9 +56,17 @@ func CreateTopDir(session *mgo.Session) error {
 	//		{"IsDeleted":false}
 	//	]}
 	//).sort({_id:-1}).pretty().limit(500)
+	exists := common.FileExists(constants.VNoteRootDir)
+	if exists {
+		panic(errors.New("dir already exists : " + constants.VNoteRootDir))
+	}
+	err := os.MkdirAll(constants.VNoteRootDir, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
 
 	topNotebooksResults := make([]*model.Notebook, 0)
-	err := collectionNotebooks.
+	err = collectionNotebooks.
 		Find(bson.M{
 			"$and": []bson.M{
 				{"IsDeleted": false},
@@ -80,40 +88,40 @@ func CreateTopDir(session *mgo.Session) error {
 		return errors.New("top notebook length = 0")
 	}
 
-	topVInfo := &model.VNotebookInfo{
-		AttachmentFolder: constants.DefaultAttachmentFolder,
-		CreatedTime:      constants.DefaultTime,
-		Files:            []model.VNoteInfo{},
-		ImageFolder:      constants.DefaultImageFolder,
-		RecycleBinFolder: "_v_recycle_bin",
-		SubDirectories: []model.SubDirInfo{
-			model.SubDirInfo{Name: "liberation"},
-		},
-		Tags:    []string{},
-		Version: "1",
-	}
+	//topVInfo := &model.VNotebookInfo{
+	//	AttachmentFolder: constants.DefaultAttachmentFolder,
+	//	CreatedTime:      constants.DefaultTime,
+	//	Files:            []model.VNoteInfo{},
+	//	ImageFolder:      constants.DefaultImageFolder,
+	//	RecycleBinFolder: "_v_recycle_bin",
+	//	SubDirectories: []model.SubDirInfo{
+	//		model.SubDirInfo{Name: "liberation"},
+	//	},
+	//	Tags:    []string{},
+	//	Version: "1",
+	//}
 
 	for _, topNotebook := range topNotebooksResults {
 		fmt.Println("- topNotebook " + topNotebook.Title)
 		notebookTitle := topNotebook.Title
-		notebookDirPath := constants.VNoteRootDir + "//" + notebookTitle
-		err := CreateNotebooks(session, notebookDirPath, topNotebook.NotebookId)
+		notebookDirPath := constants.VNoteRootDir + "/" + notebookTitle
+		err := CreateNotebooks(session, notebookDirPath, topNotebook.NotebookId, true)
 		if err != nil {
 			return err
 		}
-		topVInfo.SubDirectories = append(topVInfo.SubDirectories, model.SubDirInfo{Name: topNotebook.Title})
+		//topVInfo.SubDirectories = append(topVInfo.SubDirectories, model.SubDirInfo{Name: topNotebook.Title})
 	}
 
-	topVNoteJson, err := json.Marshal(topVInfo)
-	if err != nil {
-		return err
-	}
+	//topVNoteJson, err := json.Marshal(topVInfo)
+	//if err != nil {
+	//	return err
+	//}
 
-	topVNodeJsonPath := constants.VNoteRootDir + "//_vnote.json"
-	err = common.ReWriteToFile(topVNodeJsonPath, topVNoteJson)
-	if err != nil {
-		return err
-	}
+	//topVNodeJsonPath := constants.VNoteRootDir + "/_vnote.json"
+	//err = common.ReWriteToFile(topVNodeJsonPath, topVNoteJson)
+	//if err != nil {
+	//	return err
+	//}
 
 	fmt.Println("end")
 	return nil
@@ -121,7 +129,7 @@ func CreateTopDir(session *mgo.Session) error {
 
 // include note and notebook
 // include generating notes and _vnote.json
-func CreateNotebooks(session *mgo.Session, notebookPath string, notebookId bson.ObjectId) error {
+func CreateNotebooks(session *mgo.Session, notebookPath string, notebookId bson.ObjectId, isTop bool) error {
 	vnoteInfos := make([]model.VNoteInfo, 0)
 	subDirInfos := make([]model.SubDirInfo, 0)
 
@@ -148,6 +156,44 @@ func CreateNotebooks(session *mgo.Session, notebookPath string, notebookId bson.
 	if err != nil {
 		return err
 	}
+
+	// create _vnote.json
+	vInfo := &model.VNotebookInfo{
+		Version:        "1",
+		Tags:           []string{},
+		CreatedTime:    "2020-09-06T00:00:00Z",
+		Files:          []model.VNoteInfo{},
+		SubDirectories: []model.SubDirInfo{},
+	}
+	unhandledVInfo := &model.VNotebookInfo{
+		Version:        "1",
+		Tags:           []string{},
+		CreatedTime:    "2020-09-06T00:00:00Z",
+		Files:          []model.VNoteInfo{},
+		SubDirectories: []model.SubDirInfo{},
+	}
+
+	noteDirPath := notebookPath // save the note into the dir
+	if isTop {
+		vInfo.AttachmentFolder = constants.DefaultAttachmentFolder
+		vInfo.ImageFolder = constants.DefaultImageFolder
+		vInfo.RecycleBinFolder = "_v_recycle_bin"
+
+		noteDirPath = notebookPath + "/_unhandled"
+		subDirInfos = append(subDirInfos, model.SubDirInfo{Name: "_unhandled"})
+		err = os.MkdirAll(noteDirPath, os.ModePerm)
+		if err != nil {
+			panic(err)
+		}
+		err = os.MkdirAll(noteDirPath+"/"+constants.DefaultImageFolder, os.ModePerm)
+		if err != nil {
+			panic(err)
+		}
+		err = os.MkdirAll(notebookPath+"/_v_recycle_bin", os.ModePerm)
+		if err != nil {
+			panic(err)
+		}
+	}
 	for _, note := range noteResults {
 		fmt.Println("-- note " + note.Title)
 		windowsIllegalTokens := []string{"?", ",", "\\", "/", "*", "\"", "“", "”", "<", ">", "|"}
@@ -165,10 +211,15 @@ func CreateNotebooks(session *mgo.Session, notebookPath string, notebookId bson.
 			Name:             note.Title,
 			Tags:             []string{},
 		})
-		err = CreateNoteMarkdown(session, note, notebookPath)
+		err = CreateNoteMarkdown(session, note, noteDirPath)
 		if err != nil {
 			return err
 		}
+	}
+	if isTop { // if top, all the note in the dir will be move to a subDir named _unhandled, and generate a _vnote.json
+		unhandledVInfo.Files = vnoteInfos
+	} else {
+		vInfo.Files = vnoteInfos
 	}
 
 	// call CreateNotebooks
@@ -184,30 +235,32 @@ func CreateNotebooks(session *mgo.Session, notebookPath string, notebookId bson.
 	if err != nil {
 		return err
 	}
+
 	for _, subNotebook := range notebookResults {
 		fmt.Println("-- subNotebook " + subNotebook.Title)
 		subDirInfos = append(subDirInfos, model.SubDirInfo{Name: subNotebook.Title})
-		CreateNotebooks(session, notebookPath+"//"+subNotebook.Title, subNotebook.NotebookId)
+		CreateNotebooks(session, notebookPath+"/"+subNotebook.Title, subNotebook.NotebookId, false)
 	}
+	vInfo.SubDirectories = subDirInfos
 
-	// create _vnote.json
-	vInfo := &model.VNotebookInfo{
-		//AttachmentFolder: "tp_attachments",
-		CreatedTime: "2020-09-06T00:00:00Z",
-		Files:       vnoteInfos,
-		//DefaultImageFolder:      constants.DefaultImageFolder,
-		//RecycleBinFolder: "_v_recycle_bin",
-		SubDirectories: subDirInfos,
-		Tags:           []string{},
-		Version:        "1",
+	if isTop {
+		unhandledVInfoContent, err := json.Marshal(unhandledVInfo)
+		if err != nil {
+			panic(err)
+		}
+		common.ReWriteToFile(notebookPath+"/_unhandled/_vnote.json", unhandledVInfoContent)
 	}
 	vInfoContent, err := json.Marshal(vInfo)
+	if err != nil {
+		panic(err)
+	}
+	common.ReWriteToFile(notebookPath+"/_vnote.json", vInfoContent)
+
 	if err != nil {
 		fmt.Println(err.Error())
 		return err
 	}
 
-	common.ReWriteToFile(notebookPath+"//_vnote.json", vInfoContent)
 	return nil
 }
 
@@ -232,7 +285,7 @@ func CreateNoteMarkdown(session *mgo.Session, note *model.Note, notebookPath str
 	//to      ![title](_tp_images/20200905232545067_24522.png)
 	noteContentResult.Content = ReplaceImageLink(session, notebookPath, noteContentResult.Content)
 
-	common.ReWriteToFile(notebookPath+"//"+note.Title, ([]byte)(noteContentResult.Content))
+	common.ReWriteToFile(notebookPath+"/"+note.Title, ([]byte)(noteContentResult.Content))
 
 	return nil
 }
